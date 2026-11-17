@@ -51,6 +51,7 @@
               :key="action"
               class="link"
               type="button"
+              :disabled="!actionEnabled(row, action)"
               @click="runAction(action, row)"
             >
               {{ action }}
@@ -75,8 +76,10 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   downloadEntries,
+  legalActions,
   listEntries,
   moduleMeta,
+  moduleStats,
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
@@ -85,7 +88,7 @@ const meta = moduleMeta('datastore')
 const columns = ["数据集编号", "数据集名称", "来源表名", "字段列表", "更新策略", "数据采样比例", "生命周期天数", "缓存开关"]
 const actions = ["提交审核", "生效发布", "废弃下线"]
 const statuses = ["草稿", "待审核", "已生效", "已废弃"]
-const stats = [{"label": "数据集定义总数", "value": 0}, {"label": "已生效数据集", "value": 0}, {"label": "待审核数据集", "value": 0}]
+const stats = ref<{ label: string; value: number }[]>([])
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -108,18 +111,19 @@ function exportRows() {
   downloadEntries(meta.key)
 }
 
+function actionEnabled(row: EntryRow, action: string): boolean {
+  return legalActions(meta.key, String(row.status)).includes(action)
+}
+
 function openCreate() {
   errorMessage.value = '数据集定义登记入口尚未接入审批流'
 }
 
 function runAction(action: string, row: EntryRow) {
-  errorMessage.value = ''
   const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
-    return
-  }
+  // 迟到回执留痕也会写运行状态记录数据集，先刷新列表再提示，页面与存储保持同版本
   reload()
+  errorMessage.value = result.ok ? '' : result.message
 }
 
 function reload() {
@@ -128,6 +132,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    stats.value = moduleStats(meta.key)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '数据集管理列表读取失败'
   }

@@ -51,6 +51,7 @@
               :key="action"
               class="link"
               type="button"
+              :disabled="!actionEnabled(row, action)"
               @click="runAction(action, row)"
             >
               {{ action }}
@@ -75,17 +76,19 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   downloadEntries,
+  legalActions,
   listEntries,
   moduleMeta,
+  moduleStats,
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('pipeline')
-const columns = ["节点编号", "节点类型", "输入源", "输出目标", "处理脚本", "依赖上游", "超时秒数", "重试次数"]
+const columns = ["节点编号", "节点类型", "输入源", "输出目标", "处理脚本", "依赖上游", "超时秒数", "重试次数", "状态链", "回执时间", "触发者", "迟到回执"]
 const actions = ["提交调度", "启动运行", "终止运行", "归档结果"]
 const statuses = ["草稿", "待调度", "运行中", "已完成", "已失败"]
-const stats = [{"label": "流水线节点总数", "value": 0}, {"label": "运行中节点", "value": 0}, {"label": "已完成节点", "value": 0}]
+const stats = ref<{ label: string; value: number }[]>([])
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -108,18 +111,19 @@ function exportRows() {
   downloadEntries(meta.key)
 }
 
+function actionEnabled(row: EntryRow, action: string): boolean {
+  return legalActions(meta.key, String(row.status)).includes(action)
+}
+
 function openCreate() {
   errorMessage.value = '流水线节点登记入口尚未接入审批流'
 }
 
 function runAction(action: string, row: EntryRow) {
-  errorMessage.value = ''
   const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
-    return
-  }
+  // 迟到回执留痕也会写运行状态记录数据集，先刷新列表再提示，页面与存储保持同版本
   reload()
+  errorMessage.value = result.ok ? '' : result.message
 }
 
 function reload() {
@@ -128,6 +132,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    stats.value = moduleStats(meta.key)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '分析流水线列表读取失败'
   }

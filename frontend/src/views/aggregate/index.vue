@@ -51,6 +51,7 @@
               :key="action"
               class="link"
               type="button"
+              :disabled="!actionEnabled(row, action)"
               @click="runAction(action, row)"
             >
               {{ action }}
@@ -75,8 +76,10 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   downloadEntries,
+  legalActions,
   listEntries,
   moduleMeta,
+  moduleStats,
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
@@ -85,7 +88,7 @@ const meta = moduleMeta('aggregate')
 const columns = ["方案编号", "聚合函数", "目标字段", "分组维度", "时间窗口", "筛选条件", "输出精度", "缓存时间"]
 const actions = ["提交校验", "启用方案", "停用方案"]
 const statuses = ["草稿", "待校验", "已启用", "已停用"]
-const stats = [{"label": "聚合方案总数", "value": 0}, {"label": "已启用方案", "value": 0}, {"label": "待校验方案", "value": 0}]
+const stats = ref<{ label: string; value: number }[]>([])
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -108,18 +111,19 @@ function exportRows() {
   downloadEntries(meta.key)
 }
 
+function actionEnabled(row: EntryRow, action: string): boolean {
+  return legalActions(meta.key, String(row.status)).includes(action)
+}
+
 function openCreate() {
   errorMessage.value = '聚合方案登记入口尚未接入审批流'
 }
 
 function runAction(action: string, row: EntryRow) {
-  errorMessage.value = ''
   const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
-    return
-  }
+  // 迟到回执留痕也会写运行状态记录数据集，先刷新列表再提示，页面与存储保持同版本
   reload()
+  errorMessage.value = result.ok ? '' : result.message
 }
 
 function reload() {
@@ -128,6 +132,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    stats.value = moduleStats(meta.key)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '聚合计算列表读取失败'
   }

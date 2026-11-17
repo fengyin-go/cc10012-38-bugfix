@@ -7,7 +7,7 @@ export const MODULES: ModuleMeta[] = [
     name: "交互查询",
     entity: "查询语句",
     desc: "维护交互查询语句的输入、执行约束与结果记录，为数据查询提供可验证的数据工程流程。",
-    fields: ["语句编号", "查询表达式", "目标数据集", "返回字段", "排序条件", "分页大小", "最大行数", "超时秒数"],
+    fields: ["语句编号", "查询表达式", "目标数据集", "返回字段", "排序条件", "分页大小", "最大行数", "超时秒数", "状态链", "回执时间", "触发者", "迟到回执"],
     statuses: ["草稿", "待执行", "执行中", "已完成", "已超时"],
     actions: ["提交执行", "启动查询", "终止查询", "保存结果"],
     actionTargets: {"提交执行": "待执行", "启动查询": "执行中", "终止查询": "已超时", "保存结果": "已完成"},
@@ -106,7 +106,7 @@ export const MODULES: ModuleMeta[] = [
     name: "分析流水线",
     entity: "流水线节点",
     desc: "维护分析流水线节点的输入、执行约束与结果记录，为数据处理编排提供可验证的数据工程流程。",
-    fields: ["节点编号", "节点类型", "输入源", "输出目标", "处理脚本", "依赖上游", "超时秒数", "重试次数"],
+    fields: ["节点编号", "节点类型", "输入源", "输出目标", "处理脚本", "依赖上游", "超时秒数", "重试次数", "状态链", "回执时间", "触发者", "迟到回执"],
     statuses: ["草稿", "待调度", "运行中", "已完成", "已失败"],
     actions: ["提交调度", "启动运行", "终止运行", "归档结果"],
     actionTargets: {"提交调度": "待调度", "启动运行": "运行中", "终止运行": "已失败", "归档结果": "已完成"},
@@ -172,7 +172,7 @@ export const MODULES: ModuleMeta[] = [
     name: "数据导出",
     entity: "导出任务",
     desc: "维护数据导出任务的输入、执行约束与结果记录，为数据导出提供可验证的数据工程流程。",
-    fields: ["任务编号", "查询SQL", "导出格式", "字段列表", "分隔符", "编码格式", "压缩方式", "目标路径"],
+    fields: ["任务编号", "查询SQL", "导出格式", "字段列表", "分隔符", "编码格式", "压缩方式", "目标路径", "状态链", "回执时间", "触发者", "迟到回执"],
     statuses: ["草稿", "待执行", "执行中", "已完成", "已失败"],
     actions: ["提交执行", "启动导出", "终止导出", "归档文件"],
     actionTargets: {"提交执行": "待执行", "启动导出": "执行中", "终止导出": "已失败", "归档文件": "已完成"},
@@ -205,3 +205,41 @@ export const MODULES: ModuleMeta[] = [
 export const MODULE_BY_KEY: Map<string, ModuleMeta> = new Map(
   MODULES.map((item) => [item.key, item]),
 )
+
+// ---- 合法状态机：全部由上面登记的状态顺序与动作顺序推导，页面和服务层共用同一份口径 ----
+// 约定：状态按生命周期顺序登记，动作按推进顺序登记。
+// 第 1 个动作从「草稿」发起，第 2 个动作从第 1 个动作的目标态发起，
+// 其余动作都从第 2 个动作的目标态（进行态，如 执行中/运行中/已发布）发起；
+// 不作为任何动作来源的状态就是终态，终态不再接受任何动作。
+
+/** 动作允许发起的来源状态；动作未登记时返回 undefined。 */
+export function actionSource(meta: ModuleMeta, action: string): string | undefined {
+  const index = meta.actions.indexOf(action)
+  if (index < 0) {
+    return undefined
+  }
+  if (index === 0) {
+    return meta.statuses[0]
+  }
+  const anchor = meta.actions[Math.min(index - 1, 1)]
+  return meta.actionTargets[anchor]
+}
+
+/** 终态列表：不作为任何动作来源的状态。 */
+export function terminalStatuses(meta: ModuleMeta): string[] {
+  const sources = new Set(
+    meta.actions.map((action) => actionSource(meta, action)).filter(Boolean),
+  )
+  return meta.statuses.filter((status) => !sources.has(status))
+}
+
+/** 待处理口径：仍处在「草稿」或「待处理」态（状态表前两位）。 */
+export function isPendingStatus(meta: ModuleMeta, status: string): boolean {
+  const index = meta.statuses.indexOf(status)
+  return index >= 0 && index <= 1
+}
+
+/** 异常口径：进入终态且不是唯一的正常终态「已完成」。 */
+export function isAbnormalStatus(meta: ModuleMeta, status: string): boolean {
+  return status !== '已完成' && terminalStatuses(meta).includes(status)
+}
